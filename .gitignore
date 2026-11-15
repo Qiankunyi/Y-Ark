@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.egg-info/
+*.sqlite3
+*.log
+*cookie*
+.tmp/
+.creatorsave/
+*.creatorsave-part
+*.db
+*.sqlite*
+settings.json
+.env
+.env.*
+build/
+dist/
+# Local project notes contain personal test history; never publish them.
+docs/REQUIREMENTS.md
+docs/PROGRESS.md
+docs/VALIDATION.md
+docs/UI-DESIGN.md
+docs/interface-audio*.png
