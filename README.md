@@ -8,6 +8,8 @@ Windows 本地 YouTube 保存工具。支持中文 / English / 日本語，主�
 
 ![Y-Ark 下载界面](docs/interface-zh.png)
 
+界面采用「葛拉尼 · Ignition」设计：鲜亮朱红斜切外壳、银白面板、亮金接缝与冰蓝指示。详见 [界面配色说明](docs/UI-THEME.md)。
+
 ## 安装与打开
 
 当前发布为**源码版**，不是双击即用的独立 EXE。支持 Windows，需先安装：
