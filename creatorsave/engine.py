@@ -257,13 +257,13 @@ def deliver(sources, root):
         raise
     return targets
 
-def download(url, folder, preset, cookie, emit, cancelled, video_format='mp4'):
+def download(url, folder, preset, cookie, emit, cancelled, video_format='mp4', *, filename_date=True):
     identity = video_id(url)
     source_url = 'https://www.youtube.com/watch?v=' + identity
-    return download_media(source_url, identity, folder, preset, cookie, emit, cancelled, video_format)
+    return download_media(source_url, identity, folder, preset, cookie, emit, cancelled, video_format, filename_date=filename_date)
 
 
-def download_media(source_url, identity, folder, preset, cookie, emit, cancelled, video_format, media_info=None):
+def download_media(source_url, identity, folder, preset, cookie, emit, cancelled, video_format, media_info=None, *, filename_date=True):
     from yt_dlp import YoutubeDL
 
     profile = OutputProfile(preset, video_format)
@@ -285,9 +285,10 @@ def download_media(source_url, identity, folder, preset, cookie, emit, cancelled
         emit({'state': 'cover' if 'Thumbnail' in name else 'merging'})
     audio_only=preset in ('audio','audio_mp3')
     tag=' (MP3)' if preset=='audio_mp3' else ' (Audio)' if audio_only else profile.filename_tag
+    date_prefix = '%(upload_date>%Y-%m-%d|unknown-date)s ' if filename_date else ''
     opts = options(cookie, emit)
     opts.update(format=FORMATS[preset], paths={'home': str(work)},
-        outtmpl='%(upload_date>%Y-%m-%d|unknown-date)s %(title).100B'+tag+' [%(id)s].%(ext)s',
+        outtmpl=date_prefix+'%(title).100B'+tag+' [%(id)s].%(ext)s',
         windowsfilenames=True, writethumbnail=True, keepvideo=True,
         merge_output_format='mkv', continuedl=True, progress_hooks=[progress],
         postprocessor_hooks=[processing], postprocessors=[{'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'}])

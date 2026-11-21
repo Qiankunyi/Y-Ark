@@ -79,11 +79,11 @@ def media_info(episode):
     }
 
 
-def download(url, episode, folder, preset, emit, cancelled, video_format):
+def download(url, episode, folder, preset, emit, cancelled, video_format, *, filename_date=True):
     source_url = page_url(url)
     if cancelled():
         raise Cancelled('Cancelled')
     info = media_info(episode)
     if cancelled():
         raise Cancelled('Cancelled')
-    return download_media(source_url, info['id'], folder, preset, '', emit, cancelled, video_format, info)
+    return download_media(source_url, info['id'], folder, preset, '', emit, cancelled, video_format, info, filename_date=filename_date)

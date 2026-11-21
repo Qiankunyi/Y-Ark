@@ -19,6 +19,40 @@ from .ui import build
 from .group_dialogs import GroupManager,MembershipDialog
 from .branding import APP_NAME, VERSION, data_directory
 
+class LessonCard(QFrame):
+    def __init__(self, choice):
+        super().__init__()
+        self.choice = choice
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setObjectName('lessonCard')
+        self.setStyleSheet(
+            'QFrame#lessonCard { border: 1px solid transparent; border-radius: 6px; }'
+            'QFrame#lessonCard:hover { border-color: palette(mid); }'
+            'QFrame#lessonCard[selected="true"] { border-color: palette(highlight); }'
+        )
+        self.set_selected(choice.isChecked())
+        choice.toggled.connect(self.set_selected)
+
+    def set_selected(self, checked):
+        self.setProperty('selected', checked)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.choice.click()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+
 class Worker(QThread):
     event = Signal(int, dict)
     parsed = Signal(dict)
@@ -52,13 +86,15 @@ class Worker(QThread):
                         except Exception: pass
                     if not self.isInterruptionRequested(): self.parsed.emit(info)
                 else:
-                    video_format=self.profiles.get(task,{}).get('video_format','mp4')
+                    profile = self.profiles.get(task, {})
+                    video_format = profile.get('video_format', 'mp4')
+                    filename_options = {} if profile.get('filename_date', True) else {'filename_date': False}
                     if preset=='local_mp3':result=export_audio_file(url,folder,emit,self.isInterruptionRequested)
                     elif preset=='local_video':result=export_video_file(url,folder,video_format,emit,self.isInterruptionRequested)
-                    elif self.profiles.get(task, {}).get('source') == 'doda':
-                        result = doda.download(url, self.profiles[task]['episode'], folder, preset, emit,
-                                               self.isInterruptionRequested, video_format)
-                    else:result=download(url,folder,preset,self.cookie,emit,self.isInterruptionRequested,video_format=video_format)
+                    elif profile.get('source') == 'doda':
+                        result = doda.download(url, profile['episode'], folder, preset, emit,
+                                               self.isInterruptionRequested, video_format, **filename_options)
+                    else:result=download(url,folder,preset,self.cookie,emit,self.isInterruptionRequested,video_format=video_format,**filename_options)
                     self.success.emit(task, result)
             except Exception as exc:
                 state = 'cancelled' if self.isInterruptionRequested() or isinstance(exc, Cancelled) else 'failed'
@@ -141,6 +177,8 @@ class Window(QMainWindow):
         self.urls.textChanged.connect(self.invalidate)
         self.source_mode.currentIndexChanged.connect(self.source_changed)
         self.daily.toggled.connect(self.save_settings)
+        self.youtube_filename_date.toggled.connect(self.save_settings)
+        self.web_filename_date.toggled.connect(self.save_settings)
         self.check_follow.clicked.connect(self.check_monitor)
         self.watch_button.clicked.connect(self.watch_selected)
         self.discovery_button.clicked.connect(self.analyze_discovery)
@@ -183,6 +221,8 @@ class Window(QMainWindow):
             application.installTranslator(self.qt_translator)
         for widget,key in self.text_bindings: widget.setText(self.t(key))
         self.creator_search.setPlaceholderText(self.t('search_creators'))
+        self.youtube_filename_date.setText('YouTube')
+        self.web_filename_date.setText(self.t('web_video'))
         self.source_mode.setAccessibleName(self.t('video_source'))
         self.source_mode.setItemText(1, self.t('web_video'))
         self.update_source_prompt()
@@ -232,6 +272,8 @@ class Window(QMainWindow):
     def save_settings(self):
         if not hasattr(self,'deno'): return
         self.config = dict(language=self.language.currentIndex(),folder=self.folder.text(),cookie=self.cookie.text(),deno=self.deno.text(),video_format=self.video_format.currentText().lower(),quality=max(0,self.quality.currentIndex()),audio_format=max(0,self.audio_format.currentIndex()),daily=self.daily.isChecked() if hasattr(self,'daily') else False)
+        self.config.update(youtube_filename_date=self.youtube_filename_date.isChecked(),
+                           web_filename_date=self.web_filename_date.isChecked())
         temp = self.data / 'settings.tmp'; temp.write_text(json.dumps(self.config,ensure_ascii=False),encoding='utf-8'); temp.replace(self.data / 'settings.json')
     def pick_path(self,kind,initial,selected):
         # Explicit in-process dialog avoids Windows shell/COM dialog hangs.
@@ -368,16 +410,19 @@ class Window(QMainWindow):
         self.preview_count.setText(str(len(self.previews)))
         self.preview_stack.setCurrentIndex(1 if self.previews else 0)
         for info in self.previews:
-            card=QWidget(); row=QHBoxLayout(card); row.setContentsMargins(0,0,0,0); row.setSpacing(16)
+            is_doda = info.get('source') == 'doda'
+            choice = QCheckBox(self.t('select_lesson')) if is_doda else None
+            if choice is not None:
+                choice.setAccessibleName(f"{self.t('select_lesson')} · {info['title']}")
+                choice.setChecked(info['selected'])
+                choice.toggled.connect(lambda checked, lesson=info: self.select_lesson(lesson, checked))
+            card = LessonCard(choice) if choice is not None else QWidget()
+            row=QHBoxLayout(card); row.setContentsMargins(0,0,0,0); row.setSpacing(16)
             cover=QLabel('▶'); cover.setObjectName('thumbnail'); cover.setFixedSize(156,96); cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
             pixmap=QPixmap()
             if info.get('thumbnail_bytes') and pixmap.loadFromData(info['thumbnail_bytes']): cover.setPixmap(pixmap.scaled(156,96,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
             row.addWidget(cover,0,Qt.AlignmentFlag.AlignTop); details=QVBoxLayout(); details.setSpacing(8)
-            if info.get('source') == 'doda':
-                choice = QCheckBox(self.t('select_lesson'))
-                choice.setAccessibleName(f"{self.t('select_lesson')} · {info['title']}")
-                choice.setChecked(info['selected'])
-                choice.toggled.connect(lambda checked, lesson=info: self.select_lesson(lesson, checked))
+            if choice is not None:
                 details.addWidget(choice)
             title=QLabel(info.get('title') or self.t('unknown')); title.setObjectName('videoTitle'); title.setTextFormat(Qt.TextFormat.PlainText); title.setWordWrap(True); details.addWidget(title)
             author_row=QHBoxLayout(); author=QLabel(info.get('channel') or self.t('unknown')); author.setTextFormat(Qt.TextFormat.PlainText); author.setWordWrap(True); author_row.addWidget(author,1)
@@ -387,6 +432,9 @@ class Window(QMainWindow):
                 follow=QPushButton(self.t('followed' if followed else 'follow_creator')); follow.setObjectName('quiet'); follow.setEnabled(not followed)
                 follow.clicked.connect(lambda checked=False,info=info:self.follow_one(info)); author_row.addWidget(follow)
             details.addLayout(author_row)
+            if is_doda:
+                for label in (cover, title, author):
+                    label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             date=info.get('upload_date') or self.t('unknown')
             if len(date)==8 and date.isdigit():date=f'{date[:4]}-{date[4:6]}-{date[6:]}'
             duration=info.get('duration'); duration=f'{int(duration)//3600:02}:{int(duration)%3600//60:02}:{int(duration)%60:02}' if duration is not None else self.t('unknown')
@@ -412,8 +460,12 @@ class Window(QMainWindow):
         jobs=[]
         for info in selected:
             if self.history.contains(info['id']) and QMessageBox.question(self,APP_NAME,info['id']+'\n'+self.t('duplicate')) != QMessageBox.StandardButton.Yes: continue
+            is_doda = info.get('source') == 'doda'
+            date_setting = self.web_filename_date if is_doda else self.youtube_filename_date
             settings = {'video_format': self.video_format.currentText().lower()}
-            if info.get('source') == 'doda':
+            if not date_setting.isChecked():
+                settings['filename_date'] = False
+            if is_doda:
                 settings.update(source='doda', episode=info['episode'])
             task=self.history.create_task(info['id'],info['url'],self.folder.text(),preset,settings)
             self.add_task(task,info['id'],info['url'],self.folder.text(),preset,'waiting',''); jobs.append((task,info['url'],self.folder.text(),preset))

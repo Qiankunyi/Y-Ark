@@ -1,4 +1,4 @@
-import os
+﻿import os
 import tempfile
 import time
 import unittest
@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox
 
@@ -39,7 +40,14 @@ class DodaTests(unittest.TestCase):
                 self.assertFalse(window.analysis_active)
                 self.assertFalse(window.start.isEnabled())
                 index = next(i for i, lesson in enumerate(window.previews) if lesson['episode'] == 69)
-                window.preview_cards[index].findChild(QCheckBox).click()
+                card = window.preview_cards[index]
+                choice = card.findChild(QCheckBox)
+                QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=card.rect().topLeft())
+                self.assertTrue(choice.isChecked())
+                QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=card.rect().bottomRight())
+                self.assertFalse(choice.isChecked())
+                QTest.mouseClick(card, Qt.MouseButton.LeftButton)
+                self.assertTrue(choice.isChecked())
                 self.assertTrue(window.start.isEnabled())
                 with patch.object(window, 'launch') as launch:
                     window.begin()
@@ -51,6 +59,18 @@ class DodaTests(unittest.TestCase):
                 self.assertFalse(window.previews)
                 self.assertEqual(window.history.task_options(task)['source'], 'doda')
                 self.assertEqual(window.history.task_options(task)['episode'], 69)
+                self.assertFalse(window.history.task_options(task)['filename_date'])
+                self.assertTrue(window.youtube_filename_date.isChecked())
+                self.assertFalse(window.web_filename_date.isChecked())
+                window.youtube_filename_date.setChecked(False)
+                window.web_filename_date.setChecked(True)
+                restored = Window(folder)
+                try:
+                    self.assertFalse(restored.youtube_filename_date.isChecked())
+                    self.assertTrue(restored.web_filename_date.isChecked())
+                    self.assertFalse(restored.history.task_options(task)['filename_date'])
+                finally:
+                    restored.close()
             finally:
                 if window.worker and window.worker.isRunning():
                     window.worker.requestInterruption()

@@ -1,6 +1,7 @@
 """All user-facing labels are translated through this module."""
 LANGUAGES = ['中文', 'English', '日本語']
 LABELS = {
+'filename_date': ('文件名包含日期', 'Include date in filenames', 'ファイル名に日付を追加'),
 'video_source': ('视频来源', 'Video source', '動画の取得元'),
 'web_video': ('网页视频', 'Web video', 'ウェブ動画'),
 'web_input': ('粘贴 doda 面试课程列表的网页地址', 'Paste the doda interview course page URL', 'doda の面接講座一覧ページの URL を入力'),
