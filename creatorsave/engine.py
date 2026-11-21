@@ -258,9 +258,15 @@ def deliver(sources, root):
     return targets
 
 def download(url, folder, preset, cookie, emit, cancelled, video_format='mp4'):
-    profile=OutputProfile(preset,video_format)
-    from yt_dlp import YoutubeDL
     identity = video_id(url)
+    source_url = 'https://www.youtube.com/watch?v=' + identity
+    return download_media(source_url, identity, folder, preset, cookie, emit, cancelled, video_format)
+
+
+def download_media(source_url, identity, folder, preset, cookie, emit, cancelled, video_format, media_info=None):
+    from yt_dlp import YoutubeDL
+
+    profile = OutputProfile(preset, video_format)
     root = Path(folder).resolve()
     root.mkdir(parents=True, exist_ok=True)
     work = root / '.creatorsave' / (identity + '-' + preset + (('-'+video_format) if not profile.audio_only else ''))
@@ -287,7 +293,10 @@ def download(url, folder, preset, cookie, emit, cancelled, video_format='mp4'):
         postprocessor_hooks=[processing], postprocessors=[{'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'}])
     emit({'state': 'extracting'})
     with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info('https://www.youtube.com/watch?v=' + identity, download=True)
+        if media_info is None:
+            info = ydl.extract_info(source_url, download=True)
+        else:
+            info = ydl.process_ie_result(media_info, download=True)
         prepared=Path(ydl.prepare_filename(info))
         base=prepared.with_suffix('')
     check()
@@ -305,7 +314,7 @@ def download(url, folder, preset, cookie, emit, cancelled, video_format='mp4'):
     warnings=[]
     metadata = {key: info.get(key) for key in ('id', 'title', 'channel', 'channel_id', 'channel_url', 'upload_date', 'duration', 'format_id', 'format', 'height', 'width', 'ext')}
     metadata.update(output_profile=profile.to_dict(),source_ext=info.get('ext'),ext=media.suffix.lstrip('.'),audio_mode=('mp3' if preset=='audio_mp3' else 'original') if audio_only else None,cover_embedded=has_embedded_cover(media),verified_audio=[{k:stream.get(k) for k in ('codec_name','bit_rate','sample_rate','channels')} for stream in result['streams'] if stream.get('codec_type')=='audio'])
-    metadata.update(source_url='https://www.youtube.com/watch?v=' + identity, downloaded_at=datetime.now(timezone.utc).isoformat(), warnings=warnings)
+    metadata.update(source_url=source_url, downloaded_at=datetime.now(timezone.utc).isoformat(), warnings=warnings)
     metadata.update(verified_media_info(result))
     sidecar = Path(str(base) + '.info.json')
     sidecar.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')

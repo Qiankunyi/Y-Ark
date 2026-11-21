@@ -1,6 +1,11 @@
 """All user-facing labels are translated through this module."""
 LANGUAGES = ['中文', 'English', '日本語']
 LABELS = {
+'video_source': ('视频来源', 'Video source', '動画の取得元'),
+'web_video': ('网页视频', 'Web video', 'ウェブ動画'),
+'web_input': ('粘贴 doda 面试课程列表的网页地址', 'Paste the doda interview course page URL', 'doda の面接講座一覧ページの URL を入力'),
+'web_invalid': ('请输入受支持的 doda 面试课程列表地址。', 'Enter the supported doda interview course page URL.', '対応する doda の面接講座一覧ページの URL を入力してください。'),
+'select_lesson': ('选择此课程', 'Select this lesson', 'この講座を選択'),
 'downloads': ('下载', 'Downloads', 'ダウンロード'), 'history': ('历史', 'History', '履歴'),
 'settings': ('设置', 'Settings', '設定'), 'logs': ('任务日志', 'Task logs', 'タスクログ'),
 'parse': ('解析链接', 'Analyze links', 'リンクを解析'), 'start': ('下载已解析视频', 'Download analyzed videos', '解析済み動画を保存'),

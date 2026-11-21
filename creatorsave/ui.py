@@ -150,7 +150,9 @@ def build(window):
     # Download intake is the first action. Confirmation and options appear together below.
     intake,inside=card(); inside.setSpacing(10); top=QHBoxLayout(); step=QLabel('01'); step.setObjectName('step'); step.setFixedSize(30,28); step.setAlignment(Qt.AlignmentFlag.AlignCenter); top.addWidget(step); top.addWidget(section('add_video')); top.addStretch(); inside.addLayout(top)
     w.urls=QTextEdit(); w.urls.setFixedHeight(64); w.urls.setAcceptRichText(False); inside.addWidget(w.urls)
-    row=QHBoxLayout(); row.addWidget(label('single_links','muted'),1); w.paste_button=button('paste','quiet'); w.parse_button=button('parse','primary'); row.addWidget(w.paste_button); row.addWidget(w.parse_button); inside.addLayout(row)
+    row=QHBoxLayout(); w.link_hint=label('single_links','muted'); row.addWidget(w.link_hint,1)
+    w.source_mode=QComboBox(); w.source_mode.addItems(['YouTube', '']); row.addWidget(w.source_mode)
+    w.paste_button=button('paste','quiet'); w.parse_button=button('parse','primary'); row.addWidget(w.paste_button); row.addWidget(w.parse_button); inside.addLayout(row)
     w.analysis_feedback=QFrame(); w.analysis_feedback.setObjectName('analysisFeedback'); feedback=QVBoxLayout(w.analysis_feedback); feedback.setContentsMargins(12,10,12,10); feedback.setSpacing(6)
     status_row=QHBoxLayout(); w.analysis_message=QLabel(); w.analysis_message.setTextFormat(Qt.TextFormat.PlainText); w.analysis_message.setWordWrap(True); status_row.addWidget(w.analysis_message,1)
     w.analysis_progress=QProgressBar(); w.analysis_progress.setObjectName('analysisProgress'); w.analysis_progress.setRange(0,0); w.analysis_progress.setTextVisible(False); w.analysis_progress.setFixedWidth(84); status_row.addWidget(w.analysis_progress); feedback.addLayout(status_row)

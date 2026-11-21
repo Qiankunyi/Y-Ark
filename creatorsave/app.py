@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QListWidgetItem, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,QInputDialog)
 from .core import History, video_id, redact, import_candidates
 from .engine import download, extract, dependencies, Cancelled, export_audio_file, export_video_file
+from . import doda
 from .i18n import tr, LANGUAGES
 from .monitor import Monitor, channel_feed
 from .ui import build
@@ -22,10 +23,11 @@ class Worker(QThread):
     event = Signal(int, dict)
     parsed = Signal(dict)
     success = Signal(int, dict)
-    def __init__(self, jobs, cookie, analyzing=False, profiles=None):
+    def __init__(self, jobs, cookie, analyzing=False, profiles=None, web=False):
         super().__init__()
         self.jobs, self.cookie, self.analyzing = jobs, cookie, analyzing
         self.profiles=profiles or {}
+        self.web = web
     def run(self):
         for task, url, folder, preset in self.jobs:
             if self.isInterruptionRequested():
@@ -34,6 +36,12 @@ class Worker(QThread):
                 if preset not in ('local_mp3','local_video'):self.event.emit(task, {'state': 'extracting'})
                 emit = lambda event, task=task: self.event.emit(task, event)
                 if self.analyzing:
+                    if self.web:
+                        for lesson in doda.lessons(url):
+                            if self.isInterruptionRequested():
+                                break
+                            self.parsed.emit(lesson)
+                        continue
                     info = extract(url, self.cookie, emit)
                     info['url'] = url
                     thumbnail=info.get('thumbnail') or ''
@@ -47,6 +55,9 @@ class Worker(QThread):
                     video_format=self.profiles.get(task,{}).get('video_format','mp4')
                     if preset=='local_mp3':result=export_audio_file(url,folder,emit,self.isInterruptionRequested)
                     elif preset=='local_video':result=export_video_file(url,folder,video_format,emit,self.isInterruptionRequested)
+                    elif self.profiles.get(task, {}).get('source') == 'doda':
+                        result = doda.download(url, self.profiles[task]['episode'], folder, preset, emit,
+                                               self.isInterruptionRequested, video_format)
                     else:result=download(url,folder,preset,self.cookie,emit,self.isInterruptionRequested,video_format=video_format)
                     self.success.emit(task, result)
             except Exception as exc:
@@ -128,6 +139,7 @@ class Window(QMainWindow):
         self.copy_button.clicked.connect(lambda: QApplication.clipboard().setText(redact(self.log.toPlainText())))
         self.language.currentIndexChanged.connect(self.translate)
         self.urls.textChanged.connect(self.invalidate)
+        self.source_mode.currentIndexChanged.connect(self.source_changed)
         self.daily.toggled.connect(self.save_settings)
         self.check_follow.clicked.connect(self.check_monitor)
         self.watch_button.clicked.connect(self.watch_selected)
@@ -171,7 +183,9 @@ class Window(QMainWindow):
             application.installTranslator(self.qt_translator)
         for widget,key in self.text_bindings: widget.setText(self.t(key))
         self.creator_search.setPlaceholderText(self.t('search_creators'))
-        self.urls.setPlaceholderText(self.t('input'))
+        self.source_mode.setAccessibleName(self.t('video_source'))
+        self.source_mode.setItemText(1, self.t('web_video'))
+        self.update_source_prompt()
         self.daily.setText(self.t('daily'))
         self.parse_button.setText(self.t('extracting' if self.analysis_active else 'parse'))
         selected=max(0,self.quality.currentIndex()) if self.quality.count() else min(3,max(0,self.config.get('quality',0))); self.quality.clear()
@@ -204,7 +218,7 @@ class Window(QMainWindow):
     def update_actions(self):
         busy=self.busy()
         self.parse_button.setEnabled(bool(self.urls.toPlainText().strip()) and not busy)
-        self.start.setEnabled(bool(self.previews) and not busy)
+        self.start.setEnabled(bool(self.selected_previews()) and not busy)
         self.export_mp3_button.setEnabled(not busy)
         self.export_video_button.setEnabled(not busy)
         selected=next((task for task,row in self.task_rows.items() if row==self.queue.currentRow()),None)
@@ -263,6 +277,18 @@ class Window(QMainWindow):
         result = dependencies()
         self.dependency_summary.setText('  ·  '.join(f"{key}: {self.t('available' if value else 'missing')}" for key,value in result.items()))
         self.dependency_text.setPlainText('\n'.join(f'{key}: {value or "MISSING"}' for key,value in result.items()) + '\n\nhttps://github.com/yt-dlp/yt-dlp#dependencies\nhttps://ffmpeg.org/download.html\nhttps://deno.com/')
+    def update_source_prompt(self):
+        web = bool(self.source_mode.currentIndex())
+        self.urls.setPlaceholderText(self.t('web_input' if web else 'input'))
+        self.link_hint.setVisible(not web)
+
+    def source_changed(self):
+        self.update_source_prompt()
+        self.invalidate()
+
+    def selected_previews(self):
+        return [info for info in self.previews if info.get('selected', True)]
+
     def invalidate(self):
         self.previews=[]; self.render_previews(); self.update_actions()
         if not self.analysis_active:self.analysis_tone=''; self.analysis_feedback.hide()
@@ -275,9 +301,9 @@ class Window(QMainWindow):
             self.analysis_failed=0; self.analysis_errors=[]; self.analysis_cancelled=False; self.analysis_started=time.monotonic()
             self.analysis_tone='running'; self.refresh_analysis_feedback(); self.analysis_clock.start()
             self.parse_button.setText(self.t('extracting'))
-        self.worker = Worker(jobs,self.cookie.text().strip(),analyzing,profiles={task:self.job_options.get(task,{}) for task,*_ in jobs})
+        self.worker = Worker(jobs,self.cookie.text().strip(),analyzing,profiles={task:self.job_options.get(task,{}) for task,*_ in jobs}, web=analyzing and bool(self.source_mode.currentIndex()))
         self.worker.event.connect(self.on_event); self.worker.parsed.connect(self.on_parsed); self.worker.success.connect(self.completed); self.worker.finished.connect(self.finished)
-        for widget in (self.parse_button,self.start,self.retry,self.urls,self.folder,self.cookie,self.deno,self.quality,self.audio_format,self.video_format): widget.setEnabled(False)
+        for widget in (self.parse_button,self.start,self.retry,self.urls,self.source_mode,self.folder,self.cookie,self.deno,self.quality,self.audio_format,self.video_format): widget.setEnabled(False)
         self.paste_button.setEnabled(False); self.destination_button.setEnabled(False); self.folder_browse.setEnabled(False)
         self.cancel.setEnabled(True); self.worker.start()
         if not analyzing:QTimer.singleShot(0,lambda:self.download_scroll.ensureWidgetVisible(self.queue,0,20))
@@ -287,8 +313,13 @@ class Window(QMainWindow):
         try:
             for line in self.urls.toPlainText().splitlines():
                 if not line.strip(): continue
-                identity=video_id(line)
-                if identity not in seen: urls.append('https://www.youtube.com/watch?v='+identity); seen.add(identity)
+                if self.source_mode.currentIndex():
+                    url = doda.page_url(line)
+                else:
+                    url = 'https://www.youtube.com/watch?v=' + video_id(line)
+                if url not in seen:
+                    urls.append(url)
+                    seen.add(url)
         except ValueError:
             self.analysis_tone='invalid'; self.refresh_analysis_feedback(); return
         self.launch([(-index-1,url,'','') for index,url in enumerate(urls)],True) if urls else None
@@ -310,7 +341,7 @@ class Window(QMainWindow):
             if self.analysis_errors:detail=self.t(self.analysis_errors[-1])
             elif seconds>=30:detail=self.t('parse_waiting')
             color='running'
-        elif tone=='invalid':text=self.t('parse_invalid'); color='error'
+        elif tone=='invalid':text=self.t('web_invalid' if self.source_mode.currentIndex() else 'parse_invalid'); color='error'
         elif tone=='cancelled':text=self.t('parse_cancelled'); color='warning'
         elif tone=='success':text=self.t('parse_success').format(count=len(self.previews)); color='success'
         elif tone=='warning':
@@ -342,6 +373,12 @@ class Window(QMainWindow):
             pixmap=QPixmap()
             if info.get('thumbnail_bytes') and pixmap.loadFromData(info['thumbnail_bytes']): cover.setPixmap(pixmap.scaled(156,96,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
             row.addWidget(cover,0,Qt.AlignmentFlag.AlignTop); details=QVBoxLayout(); details.setSpacing(8)
+            if info.get('source') == 'doda':
+                choice = QCheckBox(self.t('select_lesson'))
+                choice.setAccessibleName(f"{self.t('select_lesson')} · {info['title']}")
+                choice.setChecked(info['selected'])
+                choice.toggled.connect(lambda checked, lesson=info: self.select_lesson(lesson, checked))
+                details.addWidget(choice)
             title=QLabel(info.get('title') or self.t('unknown')); title.setObjectName('videoTitle'); title.setTextFormat(Qt.TextFormat.PlainText); title.setWordWrap(True); details.addWidget(title)
             author_row=QHBoxLayout(); author=QLabel(info.get('channel') or self.t('unknown')); author.setTextFormat(Qt.TextFormat.PlainText); author.setWordWrap(True); author_row.addWidget(author,1)
             identity=info.get('channel_id')
@@ -354,21 +391,31 @@ class Window(QMainWindow):
             if len(date)==8 and date.isdigit():date=f'{date[:4]}-{date[4:6]}-{date[6:]}'
             duration=info.get('duration'); duration=f'{int(duration)//3600:02}:{int(duration)%3600//60:02}:{int(duration)%60:02}' if duration is not None else self.t('unknown')
             heights=', '.join(str(height)+'p' for height in info.get('heights',[])) or self.t('unknown')
-            meta=QLabel(f'{date}  ·  {duration}\n{heights}'); meta.setObjectName('muted'); meta.setWordWrap(True); details.addWidget(meta); details.addStretch()
+            if info.get('source') != 'doda':
+                meta=QLabel(f'{date}  ·  {duration}\n{heights}'); meta.setObjectName('muted'); meta.setWordWrap(True); details.addWidget(meta)
+            details.addStretch()
             row.addLayout(details,1); self.preview_layout.insertWidget(self.preview_layout.count()-1,card)
             self.preview_cards.append(card)
+    def select_lesson(self, info, checked):
+        info['selected'] = checked
+        self.update_actions()
+
     def follow_one(self,info):
         self.monitor.follow(info['channel_id'],info.get('channel') or info['channel_id'])
         self.refresh_following(); self.render_previews()
     def begin(self):
         if self.busy(): return
-        if not self.previews: QMessageBox.information(self,APP_NAME,self.t('not_ready')); return
+        selected = self.selected_previews()
+        if not selected: QMessageBox.information(self,APP_NAME,self.t('not_ready')); return
         preset=('best','1080','720','audio')[self.quality.currentIndex()]
         if preset=='audio' and self.audio_format.currentIndex()==1:preset='audio_mp3'
         jobs=[]
-        for info in self.previews:
+        for info in selected:
             if self.history.contains(info['id']) and QMessageBox.question(self,APP_NAME,info['id']+'\n'+self.t('duplicate')) != QMessageBox.StandardButton.Yes: continue
-            task=self.history.create_task(info['id'],info['url'],self.folder.text(),preset,{'video_format':self.video_format.currentText().lower()})
+            settings = {'video_format': self.video_format.currentText().lower()}
+            if info.get('source') == 'doda':
+                settings.update(source='doda', episode=info['episode'])
+            task=self.history.create_task(info['id'],info['url'],self.folder.text(),preset,settings)
             self.add_task(task,info['id'],info['url'],self.folder.text(),preset,'waiting',''); jobs.append((task,info['url'],self.folder.text(),preset))
         if jobs: self.launch(jobs)
     def add_task(self,task,identity,url,folder,preset,state,detail):
@@ -428,7 +475,7 @@ class Window(QMainWindow):
             self.analysis_active=False; self.analysis_clock.stop()
             self.analysis_tone='cancelled' if self.analysis_cancelled else ('warning' if self.analysis_failed and self.previews else 'error' if self.analysis_failed else 'success')
             self.refresh_analysis_feedback(); self.parse_button.setText(self.t('parse'))
-        for widget in (self.parse_button,self.start,self.retry,self.urls,self.folder,self.cookie,self.deno,self.quality,self.audio_format,self.video_format): widget.setEnabled(True)
+        for widget in (self.parse_button,self.start,self.retry,self.urls,self.source_mode,self.folder,self.cookie,self.deno,self.quality,self.audio_format,self.video_format): widget.setEnabled(True)
         self.save_settings()
         self.cancel.setEnabled(False); self.paste_button.setEnabled(True); self.destination_button.setEnabled(True); self.folder_browse.setEnabled(True); self.update_actions()
     def stop(self):
@@ -578,7 +625,7 @@ class Window(QMainWindow):
         if self.busy(): return
         row=self.discovery_table.currentRow()
         if row>=0:
-            identity=self.discovery_table.item(row,3).text(); self.urls.setPlainText('https://www.youtube.com/watch?v='+identity); self.navigate(0); self.analyze()
+            identity=self.discovery_table.item(row,3).text(); self.source_mode.setCurrentIndex(0); self.urls.setPlainText('https://www.youtube.com/watch?v='+identity); self.navigate(0); self.analyze()
     def closeEvent(self,event):
         if self.monitor_worker and self.monitor_worker.isRunning(): self.monitor_worker.requestInterruption(); event.ignore(); return
 
